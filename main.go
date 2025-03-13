@@ -581,70 +581,70 @@ func GenerateClientFromProgramIDL(idl IDL) ([]*FileWrapper, error) {
 			group.Add(Id("Errors").Op("=").Map(Int()).Id("CustomError").Values(errDict))
 		}))
 
-		file.Add(Empty().Id(`
-type CustomError interface {
-	Code() int
-	Name() string
-	Error() string
-}
-
-type customErrorDef struct {
-	code int
-	name string
-	msg  string
-}
-
-func (e *customErrorDef) Code() int {
-	return e.code
-}
-
-func (e *customErrorDef) Name() string {
-	return e.name
-}
-
-func (e *customErrorDef) Error() string {
-	return fmt.Sprintf("%s(%d): %s", e.name, e.code, e.msg)
-}
-
-func DecodeCustomError(rpcErr error) (err error, ok bool) {
-	if errCode, o := decodeErrorCode(rpcErr); o {
-		if customErr, o := Errors[errCode]; o {
-			err = customErr
-			ok = true
-			return
-		}
-	}
-	return
-}
-
-func decodeErrorCode(rpcErr error) (errorCode int, ok bool) {
-	var jErr *ag_jsonrpc.RPCError
-	if errors.As(rpcErr, &jErr) && jErr.Data != nil {
-		if root, o := jErr.Data.(map[string]interface{}); o {
-			if rootErr, o := root["err"].(map[string]interface{}); o {
-				if rootErrInstructionError, o := rootErr["InstructionError"]; o {
-					if rootErrInstructionErrorItems, o := rootErrInstructionError.([]interface{}); o {
-						if len(rootErrInstructionErrorItems) == 2 {
-							if v, o := rootErrInstructionErrorItems[1].(map[string]interface{}); o {
-								if v2, o := v["Custom"].(json.Number); o {
-									if code, err := v2.Int64(); err == nil {
-										ok = true
-										errorCode = int(code)
-									}
-								} else if v2, o := v["Custom"].(float64); o {
-									ok = true
-									errorCode = int(v2)
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	return
-}
-`))
+		file.Add(
+			Type().Id("CustomError").Interface(
+				Id("Code").Params().Int(),
+				Id("Name").Params().String(),
+				Id("Error").Params().String(),
+			),
+			Line(),
+			Type().Id("customErrorDef").Struct(
+				Id("code").Int(),
+				Id("name").String(),
+				Id("msg").String(),
+			),
+			Line(),
+			Func().Params(Id("e").Op("*").Id("customErrorDef")).Id("Code").Params().Int().Block(
+				Return(Id("e").Dot("code")),
+			),
+			Line(),
+			Func().Params(Id("e").Op("*").Id("customErrorDef")).Id("Name").Params().String().Block(
+				Return(Id("e").Dot("name")),
+			),
+			Line(),
+			Func().Params(Id("e").Op("*").Id("customErrorDef")).Id("Error").Params().String().Block(
+				Return(Qual("fmt", "Sprintf").Call(Lit("%s(%d): %s"), Id("e").Dot("name"), Id("e").Dot("code"), Id("e").Dot("msg"))),
+			),
+			Line(),
+			Func().Id("DecodeCustomError").Params(Id("rpcErr").Error()).Params(Err().Error(), Id("ok").Bool()).Block(
+				If(List(Id("errCode"), Id("o")).Op(":=").Id("decodeErrorCode").Call(Id("rpcErr")), Id("o")).Block(
+					If(List(Id("customErr"), Id("o")).Op(":=").Id("Errors").Index(Id("errCode")), Id("o")).Block(
+						Id("err").Op("=").Id("customErr"),
+						Id("ok").Op("=").True(),
+						Return(),
+					),
+				),
+				Return(),
+			),
+			Line(),
+			Func().Id("decodeErrorCode").Params(Id("rpcErr").Error()).Params(Id("errorCode").Int(), Id("ok").Bool()).Block(
+				Var().Id("jErr").Op("*").Qual("github.com/gagliardetto/solana-go/rpc/jsonrpc", "RPCError"),
+				If(Qual("errors", "As").Call(Id("rpcErr"), Op("&").Id("jErr")).Op("&&").Id("jErr").Dot("Data").Op("!=").Nil()).Block(
+					If(List(Id("root"), Id("o")).Op(":=").Id("jErr").Dot("Data").Assert(Map(String()).Interface()), Id("o")).Block(
+						If(List(Id("rootErr"), Id("o")).Op(":=").Id("root").Index(Lit("err")).Assert(Map(String()).Interface()), Id("o")).Block(
+							If(List(Id("rootErrInstructionError"), Id("o")).Op(":=").Id("rootErr").Index(Lit("InstructionError")), Id("o")).Block(
+								If(List(Id("rootErrInstructionErrorItems"), Id("o")).Op(":=").Id("rootErrInstructionError").Assert(Index().Interface()), Id("o")).Block(
+									If(Len(Id("rootErrInstructionErrorItems")).Op("==").Lit(2)).Block(
+										If(List(Id("v"), Id("o")).Op(":=").Id("rootErrInstructionErrorItems").Index(Lit(1)).Assert(Map(String()).Interface()), Id("o")).Block(
+											If(List(Id("v2"), Id("o")).Op(":=").Id("v").Index(Lit("Custom")).Assert(Qual("encoding/json", "Number")), Id("o")).Block(
+												If(List(Id("code"), Err()).Op(":=").Id("v2").Dot("Int64").Call(), Err().Op("==").Nil()).Block(
+													Id("ok").Op("=").True(),
+													Id("errorCode").Op("=").Int().Call(Id("code")),
+												),
+											).Else().If(List(Id("v2"), Id("o")).Op(":=").Id("v").Index(Lit("Custom")).Assert(Float64()), Id("o")).Block(
+												Id("ok").Op("=").True(),
+												Id("errorCode").Op("=").Int().Call(Id("v2")),
+											),
+										),
+									),
+								),
+							),
+						),
+					),
+				),
+				Return(),
+			),
+		)
 
 		files = append(files, &FileWrapper{
 			Name: "errors",
