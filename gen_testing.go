@@ -1,9 +1,10 @@
 package main
 
 import (
+	"strings"
+
 	. "github.com/dave/jennifer/jen"
 	. "github.com/gagliardetto/utilz"
-	"strings"
 )
 
 func isAnyFieldComplexEnum(envelopes ...IdlField) bool {
@@ -15,15 +16,15 @@ func isAnyFieldComplexEnum(envelopes ...IdlField) bool {
 	return false
 }
 
-func countFieldComplexEnum(envelopes ...IdlField) int {
-	var count int
-	for _, v := range envelopes {
-		if isComplexEnum(v.Type) {
-			count++
-		}
-	}
-	return count
-}
+// func countFieldComplexEnum(envelopes ...IdlField) int {
+// 	var count int
+// 	for _, v := range envelopes {
+// 		if isComplexEnum(v.Type) {
+// 			count++
+// 		}
+// 	}
+// 	return count
+// }
 
 func genTestingFuncs(idl IDL) ([]*FileWrapper, error) {
 
