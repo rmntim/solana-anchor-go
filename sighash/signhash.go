@@ -52,13 +52,13 @@ func (r *reader) Move() bool {
 //	    use unicode_segmentation::UnicodeSegmentation;
 //	    s.unicode_words()
 //	}
-func splitByUnicode(s string) []string {
-	parts := strings.FieldsFunc(s, func(r rune) bool {
-		// TODO: see https://unicode.org/reports/tr29/#Word_Boundaries
-		return !(unicode.IsLetter(r) || unicode.IsDigit(r)) || unicode.Is(unicode.Extender, r)
-	})
-	return parts
-}
+// func splitByUnicode(s string) []string {
+// 	parts := strings.FieldsFunc(s, func(r rune) bool {
+// 		// TODO: see https://unicode.org/reports/tr29/#Word_Boundaries
+// 		return !(unicode.IsLetter(r) || unicode.IsDigit(r)) || unicode.Is(unicode.Extender, r)
+// 	})
+// 	return parts
+// }
 
 // #[cfg(not(feature = "unicode"))]
 func splitIntoWords(s string) []string {
