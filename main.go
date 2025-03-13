@@ -266,29 +266,45 @@ func GenerateClientFromProgramIDL(idl IDL) ([]*FileWrapper, error) {
 			return nil, err
 		}
 
-		file.Add(Empty().Id(`
-func DecodeInstructions(message *ag_solanago.Message) (instructions []*Instruction, err error) {
-	for _, ins := range message.Instructions {
-		var programID ag_solanago.PublicKey
-		if programID, err = message.Program(ins.ProgramIDIndex); err != nil {
-			return
-		}
-		if !programID.Equals(ProgramID) {
-			continue
-		}
-		var accounts []*ag_solanago.AccountMeta
-		if accounts, err = ins.ResolveInstructionAccounts(message); err != nil {
-			return
-		}
-		var insDecoded *Instruction
-		if insDecoded, err = decodeInstruction(accounts, ins.Data); err != nil {
-			return
-		}
-		instructions = append(instructions, insDecoded)
-	}
-	return
-}
-`))
+		file.Add(
+			Line().Line().
+				Func().Id("DecodeInstructions").
+				Params(Id("message").Op("*").Qual(PkgSolanaGo, "Message")).
+				Params(
+					Id("instructions").Index().Op("*").Id("Instruction"),
+					Err().Error(),
+				).
+				BlockFunc(func(body *Group) {
+					body.For(List(Id("_"), Id("ins")).Op(":=").Range().Id("message").Dot("Instructions")).Block(
+						Var().Id("programID").Qual(PkgSolanaGo, "PublicKey"),
+						If(
+							List(Id("programID"), Err()).Op("=").Id("message").Dot("Program").Call(Id("ins").Dot("ProgramIDIndex")),
+							Err().Op("!=").Nil(),
+						).Block(
+							Return(),
+						),
+						If(Op("!").Id("programID").Dot("Equals").Call(Id("ProgramID"))).Block(
+							Continue(),
+						),
+						Var().Id("accounts").Index().Op("*").Qual(PkgSolanaGo, "AccountMeta"),
+						If(
+							List(Id("accounts"), Err()).Op("=").Id("ins").Dot("ResolveInstructionAccounts").Call(Id("message")),
+							Err().Op("!=").Nil(),
+						).Block(
+							Return(),
+						),
+						Var().Id("insDecoded").Op("*").Id("Instruction"),
+						If(
+							List(Id("insDecoded"), Err()).Op("=").Id("decodeInstruction").Call(Id("accounts"), Id("ins").Dot("Data")),
+							Err().Op("!=").Nil(),
+						).Block(
+							Return(),
+						),
+						Id("instructions").Op("=").Append(Id("instructions"), Id("insDecoded")),
+					)
+					body.Return()
+				}),
+		)
 
 		files = append(files, &FileWrapper{
 			Name: "instructions",
