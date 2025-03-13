@@ -535,7 +535,6 @@ type CustomError interface {
 	Name() string
 	Error() string
 }
-
 type customErrorDef struct {
 	code int
 	name string
@@ -545,15 +544,12 @@ type customErrorDef struct {
 func (e *customErrorDef) Code() int {
 	return e.code
 }
-
 func (e *customErrorDef) Name() string {
 	return e.name
 }
-
 func (e *customErrorDef) Error() string {
 	return fmt.Sprintf("%s(%d): %s", e.name, e.code, e.msg)
 }
-
 func DecodeCustomError(rpcErr error) (err error, ok bool) {
 	if errCode, o := decodeErrorCode(rpcErr); o {
 		if customErr, o := Errors[errCode]; o {
@@ -564,7 +560,6 @@ func DecodeCustomError(rpcErr error) (err error, ok bool) {
 	}
 	return
 }
-
 func decodeErrorCode(rpcErr error) (errorCode int, ok bool) {
 	var jErr *ag_jsonrpc.RPCError
 	if errors.As(rpcErr, &jErr) && jErr.Data != nil {
