@@ -5,9 +5,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/gagliardetto/solana-go"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,6 +12,9 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/davecgh/go-spew/spew"
+	"github.com/gagliardetto/solana-go"
 
 	. "github.com/dave/jennifer/jen"
 	"github.com/fragmetric-labs/solana-anchor-go/sighash"
@@ -155,7 +155,7 @@ func main() {
 
 		{
 			mdf := &modfile.File{}
-			mdf.AddModuleStmt(GetConfig().ModPath)
+			_ = mdf.AddModuleStmt(GetConfig().ModPath)
 
 			mdf.AddNewRequire("github.com/gagliardetto/solana-go", "v1.5.0", false)
 			mdf.AddNewRequire("github.com/fragmetric-labs/solana-binary-go", "v0.8.0", false)
@@ -191,7 +191,7 @@ func main() {
 					MustAbs(gomodFilepath),
 				)
 				// Write `go.mod` file:
-				err = ioutil.WriteFile(gomodFilepath, mfBytes, 0666)
+				err = os.WriteFile(gomodFilepath, mfBytes, 0666)
 				if err != nil {
 					panic(err)
 				}
@@ -382,116 +382,156 @@ func DecodeInstructions(message *ag_solanago.Message) (instructions []*Instructi
 		file.Add(Empty().Var().Defs(Id("_").Op("*").Qual("github.com/gagliardetto/solana-go/rpc", "GetTransactionResult").Op("=").Nil()))
 		file.Add(Empty().Var().Defs(Id("_").Op("*").Qual("github.com/mr-tron/base58", "Alphabet").Op("=").Nil()))
 
-		file.Add(Empty().Id(`
-type Event struct {
-	Name string
-	Data EventData
-}
+		file.Add(Empty().Type().Id("Event").Struct(
+			Id("Name").String(),
+			Id("Data").Id("EventData"),
+		))
 
-type EventData interface {
-	UnmarshalWithDecoder(decoder *ag_binary.Decoder) error
-	isEventData()
-}
+		file.Add(Empty().Type().Id("EventData").Interface(
+			Id("UnmarshalWithDecoder").Params(Id("decoder").Op("*").Qual(PkgDfuseBinary, "Decoder")).Error(),
+			Id("isEventData").Params(),
+		))
 
-const eventLogPrefix = "Program data: "
+		file.Add(Empty().Const().Id("eventLogPrefix").Op("=").Lit("Program data: "))
 
-func DecodeEvents(txData *ag_rpc.GetTransactionResult, targetProgramId ag_solanago.PublicKey, getAddressTables func(altAddresses []ag_solanago.PublicKey) (tables map[ag_solanago.PublicKey]ag_solanago.PublicKeySlice, err error)) (evts []*Event, err error) {
-	var tx *ag_solanago.Transaction
-	if tx, err = txData.Transaction.GetTransaction(); err != nil {
-		return
-	}
+		file.Add(Empty().Func().Id("DecodeEvents").Params(
+			Id("txData").Op("*").Qual("github.com/gagliardetto/solana-go/rpc", "GetTransactionResult"),
+			Id("targetProgramId").Qual(PkgSolanaGo, "PublicKey"),
+			Id("getAddressTables").Func().Params(
+				Id("altAddresses").Index().Qual(PkgSolanaGo, "PublicKey"),
+			).Params(
+				Id("tables").Map(Qual(PkgSolanaGo, "PublicKey")).Qual(PkgSolanaGo, "PublicKeySlice"),
+				Err().Error(),
+			),
+		).Params(
+			Id("evts").Index().Op("*").Id("Event"),
+			Err().Error(),
+		).BlockFunc(func(g *Group) {
+			g.Var().Id("tx").Op("*").Qual(PkgSolanaGo, "Transaction")
+			g.If(List(Id("tx"), Err()).Op("=").Id("txData").Dot("Transaction").Dot("GetTransaction").Call(), Err().Op("!=").Nil()).Block(
+				Return(),
+			)
 
-	altAddresses := make([]ag_solanago.PublicKey, len(tx.Message.AddressTableLookups))
-	for i, alt := range tx.Message.AddressTableLookups {
-		altAddresses[i] = alt.AccountKey
-	}
-	if len(altAddresses) > 0 {
-		var tables map[ag_solanago.PublicKey]ag_solanago.PublicKeySlice
-		if tables, err = getAddressTables(altAddresses); err != nil {
-			return
-		}
-		tx.Message.SetAddressTables(tables)
-		if err = tx.Message.ResolveLookups(); err != nil {
-			return
-		}
-	}
-
-	var base64Binaries [][]byte
-	logMessageEventBinaries, err := decodeEventsFromLogMessage(txData.Meta.LogMessages)
-	if err != nil {
-		return
-	}
-
-	emitedCPIEventBinaries, err := decodeEventsFromEmitCPI(txData.Meta.InnerInstructions, tx.Message.AccountKeys, targetProgramId)
-	if err != nil {
-		return
-	}
-
-	base64Binaries = append(base64Binaries, logMessageEventBinaries...)
-	base64Binaries = append(base64Binaries, emitedCPIEventBinaries...)
-	evts, err = parseEvents(base64Binaries)
-	return
-}
-
-func decodeEventsFromLogMessage(logMessages []string) (eventBinaries [][]byte, err error) {
-	for _, log := range logMessages {
-		if strings.HasPrefix(log, eventLogPrefix) {
-			eventBase64 := log[len(eventLogPrefix):]
-
-			var eventBinary []byte
-			if eventBinary, err = base64.StdEncoding.DecodeString(eventBase64); err != nil {
-				err = fmt.Errorf("failed to decode logMessage event: %s", eventBase64)
-				return
-			}
-			eventBinaries = append(eventBinaries, eventBinary)
-		}
-	}
-	return
-}
-
-func decodeEventsFromEmitCPI(InnerInstructions []ag_rpc.InnerInstruction, accountKeys ag_solanago.PublicKeySlice, targetProgramId ag_solanago.PublicKey) (eventBinaries [][]byte, err error) {
-	for _, parsedIx := range InnerInstructions {
-		for _, ix := range parsedIx.Instructions {
-			if accountKeys[ix.ProgramIDIndex] != targetProgramId {
-				continue
-			}
-
-			var ixData []byte
-			if ixData, err = ag_base58.Decode(ix.Data.String()); err != nil {
-				return
-			}
-			eventBase64 := base64.StdEncoding.EncodeToString(ixData[8:])
-			var eventBinary []byte
-			if eventBinary, err = base64.StdEncoding.DecodeString(eventBase64); err != nil {
-				return
-			}
-			eventBinaries = append(eventBinaries, eventBinary)
-		}
-	}
-	return
-}
-
-func parseEvents(base64Binaries [][]byte) (evts []*Event, err error) {
-	decoder := ag_binary.NewDecoderWithEncoding(nil, ag_binary.EncodingBorsh)
-
-	for _, eventBinary := range base64Binaries {
-		eventDiscriminator := ag_binary.TypeID(eventBinary[:8])
-		if eventType, ok := eventTypes[eventDiscriminator]; ok {
-			eventData := reflect.New(eventType).Interface().(EventData)
-			decoder.Reset(eventBinary)
-			if err = eventData.UnmarshalWithDecoder(decoder); err != nil {
-				err = fmt.Errorf("failed to unmarshal event %s: %w", eventType.String(), err)
-				return
-			}
-			evts = append(evts, &Event{
-				Name: eventNames[eventDiscriminator],
-				Data: eventData,
+			g.Id("altAddresses").Op(":=").Make(Index().Qual(PkgSolanaGo, "PublicKey"), Len(Id("tx").Dot("Message").Dot("AddressTableLookups")))
+			g.For(List(Id("i"), Id("alt")).Op(":=").Range().Id("tx").Dot("Message").Dot("AddressTableLookups")).Block(
+				Id("altAddresses").Index(Id("i")).Op("=").Id("alt").Dot("AccountKey"),
+			)
+			g.If(Len(Id("altAddresses")).Op(">").Lit(0)).BlockFunc(func(g *Group) {
+				g.Var().Id("tables").Map(Qual(PkgSolanaGo, "PublicKey")).Qual(PkgSolanaGo, "PublicKeySlice")
+				g.If(List(Id("tables"), Err()).Op("=").Id("getAddressTables").Call(Id("altAddresses")), Err().Op("!=").Nil()).Block(
+					Return(),
+				)
+				g.Id("tx").Dot("Message").Dot("SetAddressTables").Call(Id("tables"))
+				g.If(Err().Op("=").Id("tx").Dot("Message").Dot("ResolveLookups").Call(), Err().Op("!=").Nil()).Block(
+					Return(),
+				)
 			})
-		}
-	}
-	return
-}
-`))
+
+			g.Var().Id("base64Binaries").Index().Index().Byte()
+			g.List(Id("logMessageEventBinaries"), Err()).Op(":=").Id("decodeEventsFromLogMessage").Call(Id("txData").Dot("Meta").Dot("LogMessages"))
+			g.If(Err().Op("!=").Nil()).Block(
+				Return(),
+			)
+
+			g.List(Id("emitedCPIEventBinaries"), Err()).Op(":=").Id("decodeEventsFromEmitCPI").Call(
+				Id("txData").Dot("Meta").Dot("InnerInstructions"),
+				Id("tx").Dot("Message").Dot("AccountKeys"),
+				Id("targetProgramId"),
+			)
+			g.If(Err().Op("!=").Nil()).Block(
+				Return(),
+			)
+
+			g.Id("base64Binaries").Op("=").Append(Id("base64Binaries"), Id("logMessageEventBinaries").Op("..."))
+			g.Id("base64Binaries").Op("=").Append(Id("base64Binaries"), Id("emitedCPIEventBinaries").Op("..."))
+			g.List(Id("evts"), Err()).Op("=").Id("parseEvents").Call(Id("base64Binaries"))
+			g.Return()
+		}))
+
+		file.Add(Empty().Func().Id("decodeEventsFromLogMessage").Params(
+			Id("logMessages").Index().String(),
+		).Params(
+			Id("eventBinaries").Index().Index().Byte(),
+			Err().Error(),
+		).BlockFunc(func(g *Group) {
+			g.For(List(Id("_"), Id("log")).Op(":=").Range().Id("logMessages")).Block(
+				If(Qual("strings", "HasPrefix").Call(Id("log"), Id("eventLogPrefix"))).BlockFunc(func(g *Group) {
+					g.Id("eventBase64").Op(":=").Id("log").Index(Len(Id("eventLogPrefix")).Op(":"))
+
+					g.Var().Id("eventBinary").Index().Byte()
+					g.If(
+						List(Id("eventBinary"), Err()).Op("=").Qual("encoding/base64", "StdEncoding").Dot("DecodeString").Call(Id("eventBase64")),
+						Err().Op("!=").Nil(),
+					).Block(
+						Err().Op("=").Qual("fmt", "Errorf").Call(Lit("failed to decode logMessage event: %s"), Id("eventBase64")),
+						Return(),
+					)
+					g.Id("eventBinaries").Op("=").Append(Id("eventBinaries"), Id("eventBinary"))
+				}),
+			)
+			g.Return()
+		}))
+
+		file.Add(Empty().Func().Id("decodeEventsFromEmitCPI").Params(
+			Id("InnerInstructions").Index().Qual("github.com/gagliardetto/solana-go/rpc", "InnerInstruction"),
+			Id("accountKeys").Qual(PkgSolanaGo, "PublicKeySlice"),
+			Id("targetProgramId").Qual(PkgSolanaGo, "PublicKey"),
+		).Params(
+			Id("eventBinaries").Index().Index().Byte(),
+			Err().Error(),
+		).BlockFunc(func(g *Group) {
+			g.For(List(Id("_"), Id("parsedIx")).Op(":=").Range().Id("InnerInstructions")).Block(
+				For(List(Id("_"), Id("ix")).Op(":=").Range().Id("parsedIx").Dot("Instructions")).BlockFunc(func(g *Group) {
+					g.If(Id("accountKeys").Index(Id("ix").Dot("ProgramIDIndex")).Op("!=").Id("targetProgramId")).Block(
+						Continue(),
+					)
+
+					g.Var().Id("ixData").Index().Byte()
+					g.If(
+						List(Id("ixData"), Err()).Op("=").Qual("github.com/mr-tron/base58", "Decode").Call(Id("ix").Dot("Data").Dot("String").Call()),
+						Err().Op("!=").Nil(),
+					).Block(
+						Return(),
+					)
+					g.Id("eventBase64").Op(":=").Qual("encoding/base64", "StdEncoding").Dot("EncodeToString").Call(Id("ixData").Index(Lit(8).Op(":")))
+					g.Var().Id("eventBinary").Index().Byte()
+					g.If(
+						List(Id("eventBinary"), Err()).Op("=").Qual("encoding/base64", "StdEncoding").Dot("DecodeString").Call(Id("eventBase64")),
+						Err().Op("!=").Nil(),
+					).Block(
+						Return(),
+					)
+					g.Id("eventBinaries").Op("=").Append(Id("eventBinaries"), Id("eventBinary"))
+				}),
+			)
+			g.Return()
+		}))
+
+		file.Add(Empty().Func().Id("parseEvents").Params(
+			Id("base64Binaries").Index().Index().Byte(),
+		).Params(
+			Id("evts").Index().Op("*").Id("Event"),
+			Err().Error(),
+		).BlockFunc(func(g *Group) {
+			g.Id("decoder").Op(":=").Qual(PkgDfuseBinary, "NewDecoderWithEncoding").Call(Nil(), Qual(PkgDfuseBinary, "EncodingBorsh"))
+
+			g.For(List(Id("_"), Id("eventBinary")).Op(":=").Range().Id("base64Binaries")).BlockFunc(func(g *Group) {
+				g.Id("eventDiscriminator").Op(":=").Qual(PkgDfuseBinary, "TypeID").Call(Id("eventBinary").Index(Lit(0).Op(":").Lit(8)))
+				g.If(List(Id("eventType"), Id("ok")).Op(":=").Id("eventTypes").Index(Id("eventDiscriminator")), Id("ok")).BlockFunc(func(g *Group) {
+					g.Id("eventData").Op(":=").Qual("reflect", "New").Call(Id("eventType")).Dot("Interface").Call().Assert(Id("EventData"))
+					g.Id("decoder").Dot("Reset").Call(Id("eventBinary"))
+					g.If(Err().Op("=").Id("eventData").Dot("UnmarshalWithDecoder").Call(Id("decoder")), Err().Op("!=").Nil()).Block(
+						Err().Op("=").Qual("fmt", "Errorf").Call(Lit("failed to unmarshal event %s: %w"), Id("eventType").Dot("String").Call(), Err()),
+						Return(),
+					)
+					g.Id("evts").Op("=").Append(Id("evts"), Op("&").Id("Event").Values(Dict{
+						Id("Name"): Id("eventNames").Index(Id("eventDiscriminator")),
+						Id("Data"): Id("eventData"),
+					}))
+				})
+			})
+			g.Return()
+		}))
 
 		files = append(files, &FileWrapper{
 			Name: "events",
@@ -709,7 +749,6 @@ func decodeErrorCode(rpcErr error) (errorCode int, ok bool) {
 							fieldsGroup.Comment("")
 						}
 
-						accountIndex++
 						return true
 					})
 				}
@@ -1271,9 +1310,10 @@ func decodeErrorCode(rpcErr error) (errorCode int, ok bool) {
 							var accountName string
 							if parentGroupPath == "" {
 								accountName = ToLowerCamel(account.Name)
-							} else {
-								// TODO
 							}
+							//else {
+							// TODO
+							//}
 
 							if SliceContains(paramNames, accountName) {
 								accountName = accountName + "Account"
@@ -1336,7 +1376,7 @@ func decodeErrorCode(rpcErr error) (errorCode int, ok bool) {
 	{
 		file := NewGoFile(idl.Metadata.Name, false)
 		code := Empty().Var().Id("Addresses").Op("=").Map(String()).Qual(PkgSolanaGo, "PublicKey").Values(DictFunc(func(dict Dict) {
-			for address, _ := range addresses {
+			for address := range addresses {
 				dict[Lit(address)] = Qual(PkgSolanaGo, "MustPublicKeyFromBase58").Call(Lit(address))
 			}
 		}))
@@ -1657,7 +1697,6 @@ func genAccountGettersSetters(
 							}
 						}
 						group.Add(Id("bumpSeed"))
-						return
 					}))
 
 					body.Return()
@@ -1690,7 +1729,6 @@ func genAccountGettersSetters(
 							}
 						}
 						group.Add(Id("bumpSeed"))
-						return
 					}))
 
 					body.Add(If(Id("err").Op("!=").Nil()).Block(Panic(Id("err"))))
@@ -1728,7 +1766,6 @@ func genAccountGettersSetters(
 							}
 						}
 						group.Add(Lit(0))
-						return
 					}))
 
 					body.Return()
@@ -1760,7 +1797,6 @@ func genAccountGettersSetters(
 							}
 						}
 						group.Add(Lit(0))
-						return
 					}))
 
 					body.Add(If(Id("err").Op("!=").Nil()).Block(Panic(Id("err"))))
