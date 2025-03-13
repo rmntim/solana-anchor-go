@@ -1,9 +1,10 @@
 package main
 
 import (
+	"strings"
+
 	. "github.com/dave/jennifer/jen"
 	. "github.com/gagliardetto/utilz"
-	"strings"
 )
 
 func isInsFieldComplexEnum(envelopes ...IdlField) bool {
