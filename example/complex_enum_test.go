@@ -1,9 +1,9 @@
 package example
 
-func toPtr[T any](x T) *T {
-	return &x
-}
-
+// func toPtr[T any](x T) *T {
+// 	return &x
+// }
+//
 //
 //func TestComplexEnum(t *testing.T) {
 //	src := restaking.OperatorRanFundCommand{

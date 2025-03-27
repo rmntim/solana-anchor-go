@@ -34,15 +34,15 @@ func isInsDeepFieldComplexEnum(idl IDL, envelopes ...IdlField) bool {
 	return false
 }
 
-func countFieldComplexEnum(envelopes ...IdlField) int {
-	var count int
-	for _, v := range envelopes {
-		if isComplexEnum(v.Type) {
-			count++
-		}
-	}
-	return count
-}
+// func countFieldComplexEnum(envelopes ...IdlField) int {
+// 	var count int
+// 	for _, v := range envelopes {
+// 		if isComplexEnum(v.Type) {
+// 			count++
+// 		}
+// 	}
+// 	return count
+// }
 
 func genTestingFuncs(idl IDL) ([]*FileWrapper, error) {
 
